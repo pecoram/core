@@ -24,9 +24,9 @@ import {
 import { Config } from './config.js';
 import type {
   RendererMain,
-  INode,
-  INodeAnimatableProps,
-  INodeWritableProps,
+  CoreNode,
+  CoreNodeAnimatableProps,
+  CoreNodeWritableProps,
   ShaderRef,
   Dimensions,
   AnimationSettings,
@@ -142,13 +142,13 @@ export interface TextNode {
 }
 // eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
 export interface ElementNode
-  extends Partial<Omit<INodeWritableProps, 'parent' | 'shader'>>,
+  extends Partial<Omit<CoreNodeWritableProps, 'parent' | 'shader'>>,
     IntrinsicCommonProps {
   [key: string]: unknown;
   id?: string;
   debug?: boolean;
   type: 'element' | 'textNode';
-  lng: INode | IntrinsicNodeProps | IntrinsicTextProps;
+  lng: CoreNode | IntrinsicNodeProps | IntrinsicTextProps;
   rendered: boolean;
   renderer?: RendererMain;
   selected?: number;
@@ -169,7 +169,7 @@ export interface ElementNode
   _animationSettings?: Partial<AnimationSettings>;
   _animationQueue:
     | Array<{
-        props: Partial<INodeAnimatableProps>;
+        props: Partial<CoreNodeAnimatableProps>;
         animationSettings?: Partial<AnimationSettings>;
       }>
     | undefined;
@@ -232,22 +232,22 @@ export class ElementNode extends Object {
       return this.animate({ [name]: value }, animationSettings).start();
     }
 
-    (this.lng[name as keyof INode] as number | string) = value;
+    (this.lng[name as keyof CoreNode] as number | string) = value;
   }
 
   animate(
-    props: Partial<INodeAnimatableProps>,
+    props: Partial<CoreNodeAnimatableProps>,
     animationSettings?: Partial<AnimationSettings>,
   ) {
     assertTruthy(this.rendered, 'Node must be rendered before animating');
-    return (this.lng as INode).animate(
+    return (this.lng as CoreNode).animate(
       props,
       animationSettings || this.animationSettings,
     );
   }
 
   chain(
-    props: Partial<INodeAnimatableProps>,
+    props: Partial<CoreNodeAnimatableProps>,
     animationSettings?: Partial<AnimationSettings>,
   ) {
     if (this._animationRunning) {
@@ -310,9 +310,9 @@ export class ElementNode extends Object {
   }
 
   _layoutOnLoad() {
-    (this.lng as INode).on(
+    (this.lng as CoreNode).on(
       'loaded',
-      (_node: INode, loadedPayload: NodeLoadedPayload) => {
+      (_node: CoreNode, loadedPayload: NodeLoadedPayload) => {
         const { dimensions } = loadedPayload;
         this.parent!.updateLayout(this, dimensions);
       },
@@ -329,7 +329,7 @@ export class ElementNode extends Object {
 
   destroy() {
     if (this._queueDelete) {
-      (this.lng as INode).destroy();
+      (this.lng as CoreNode).destroy();
     }
   }
   // Must be set before render
@@ -617,7 +617,9 @@ export class ElementNode extends Object {
 
     node.onEvents &&
       node.onEvents.forEach(([name, handler]) => {
-        (node.lng as INode).on(name, (inode, data) => handler(node, data));
+        (node.lng as CoreNode).on(name, (CoreNode, data) =>
+          handler(node, data),
+        );
       });
 
     // L3 Inspector adds div to the lng object

@@ -4,9 +4,9 @@ import {
   type FadeOutEffectProps,
   type GlitchEffectProps,
   type GrayscaleEffectProps,
-  type INode,
-  type INodeWritableProps,
-  type ITextNodeWritableProps,
+  type CoreNode,
+  type CoreNodeWritableProps,
+  type CoreTextNodeWritableProps,
   type LinearGradientEffectProps,
   type NodeFailedPayload,
   type NodeLoadedPayload,
@@ -61,8 +61,8 @@ export interface IntrinsicNodeCommonProps {
   forwardStates?: boolean;
   id?: string;
   onCreate?: (target: ElementNode) => void;
-  onLoad?: (target: INode, nodeLoadedPayload: NodeLoadedPayload) => void;
-  onFail?: (target: INode, nodeFailedPayload: NodeFailedPayload) => void;
+  onLoad?: (target: CoreNode, nodeLoadedPayload: NodeLoadedPayload) => void;
+  onFail?: (target: CoreNode, nodeFailedPayload: NodeFailedPayload) => void;
   onBeforeLayout?: (
     this: ElementNode,
     target: ElementNode,
@@ -127,13 +127,13 @@ export interface IntrinsicCommonProps
     IntrinsicNodeStyleCommonProps,
     IntrinsicTextStyleCommonProps {}
 export interface IntrinsicNodeStyleProps
-  extends Partial<Omit<INodeWritableProps, 'parent' | 'shader'>>,
+  extends Partial<Omit<CoreNodeWritableProps, 'parent' | 'shader'>>,
     IntrinsicNodeStyleCommonProps {
   [key: string]: unknown;
 }
 
 export interface IntrinsicTextNodeStyleProps
-  extends Partial<Omit<ITextNodeWritableProps, 'parent' | 'shader'>>,
+  extends Partial<Omit<CoreTextNodeWritableProps, 'parent' | 'shader'>>,
     IntrinsicTextStyleCommonProps {
   [key: string]: unknown;
 }
