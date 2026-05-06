@@ -235,7 +235,72 @@ function updateNodeParent(node: DOMNode | DOMText) {
   }
 }
 
-// getNodeLineHeight moved to domRendererUtils.ts
+/**
+ * Builds the CSS transform string from node props (x, y, rotation, scale, mount).
+ * Returns an empty string if no transform is needed.
+ */
+function buildTransformCSS(props: IRendererNodeProps): string {
+  const transforms: string[] = [];
+
+  const { x, y } = props;
+  const hasMountX = props.mountX != null && props.mountX !== 0;
+  const hasMountY = props.mountY != null && props.mountY !== 0;
+
+  if (x !== 0) transforms.push(`translateX(${x}px)`);
+  if (hasMountX) transforms.push(`translateX(${-props.mountX! * 100}%)`);
+
+  if (y !== 0) transforms.push(`translateY(${y}px)`);
+  if (hasMountY) transforms.push(`translateY(${-props.mountY! * 100}%)`);
+
+  if (props.rotation !== 0) transforms.push(`rotate(${props.rotation}rad)`);
+
+  if (props.scale !== 1 && props.scale != null) {
+    transforms.push(`scale(${props.scale})`);
+  } else {
+    if (props.scaleX !== 1) transforms.push(`scaleX(${props.scaleX})`);
+    if (props.scaleY !== 1) transforms.push(`scaleY(${props.scaleY})`);
+  }
+
+  return transforms.join(' ');
+}
+
+/**
+ * Fast path for transform-only updates (x, y, rotation, scale, mount).
+ * Skips full style rebuild but still re-evaluates viewport bounds for nodes
+ * with a texture source to drive lazy image load/unload during scroll.
+ */
+function updateTransformOnly(node: DOMNode | DOMText): void {
+  const transform = buildTransformCSS(node.props);
+  const s = node.div.style;
+
+  if (transform.length > 0) {
+    s.transform = `${transform}`;
+    s.backfaceVisibility = 'hidden';
+  } else {
+    s.transform = '';
+    s.backfaceVisibility = '';
+  }
+
+  updateRenderStateIfNeeded(node);
+}
+
+/**
+ * Recomputes the viewport bounds state for a node with a texture source and,
+ * if changed, triggers lazy image load or unload via updateRenderState.
+ */
+function updateRenderStateIfNeeded(node: DOMNode | DOMText): void {
+  if (!(node instanceof DOMNode) || node === node.stage.root) return;
+  const hasTextureSrc = nodeHasTextureSource(node);
+  if (hasTextureSrc && node.boundsDirty) {
+    const next = computeRenderStateForNode(node);
+    if (next != null) {
+      node.updateRenderState(next);
+    }
+    node.boundsDirty = false;
+  } else if (!hasTextureSrc) {
+    node.boundsDirty = false;
+  }
+}
 
 function updateNodeStyles(node: DOMNode | DOMText) {
   let { props } = node;
@@ -250,29 +315,11 @@ function updateNodeStyles(node: DOMNode | DOMText) {
 
   // Transform
   {
-    let transform = '';
-
-    let { x, y } = props;
-    const hasMountX = props.mountX != null && props.mountX !== 0;
-    const hasMountY = props.mountY != null && props.mountY !== 0;
-
-    if (x !== 0) transform += `translateX(${x}px)`;
-    if (hasMountX) transform += `translateX(${-props.mountX! * 100}%)`;
-
-    if (y !== 0) transform += `translateY(${y}px)`;
-    if (hasMountY) transform += `translateY(${-props.mountY! * 100}%)`;
-
-    if (props.rotation !== 0) transform += `rotate(${props.rotation}rad)`;
-
-    if (props.scale !== 1 && props.scale != null) {
-      transform += `scale(${props.scale})`;
-    } else {
-      if (props.scaleX !== 1) transform += `scaleX(${props.scaleX})`;
-      if (props.scaleY !== 1) transform += `scaleY(${props.scaleY})`;
-    }
-
+    const transform = buildTransformCSS(props);
     if (transform.length > 0) {
       style += `transform: ${transform};`;
+      style += `backface-visibility: hidden;`;
+      style += `-webkit-backface-visibility: hidden;`;
     }
   }
 
@@ -392,10 +439,9 @@ function updateNodeStyles(node: DOMNode | DOMText) {
     let imgStyle = '';
     let hasDivBgTint = false;
 
+    let hasTint = false;
     if (rawImgSrc) {
-      needsBackgroundLayer = true;
-
-      const hasTint = props.color !== 0xffffffff && props.color !== 0x00000000;
+      hasTint = props.color !== 0xffffffff && props.color !== 0x00000000;
 
       if (hasTint) {
         bgStyle += `background-color: ${colorToRgba(props.color)};`;
@@ -455,7 +501,7 @@ function updateNodeStyles(node: DOMNode | DOMText) {
         if (supportsMixBlendMode) {
           imgStyleParts.push('mix-blend-mode: multiply');
         } else {
-          imgStyleParts.push('opacity: 0.9');
+          imgStyleParts.push('opacity: 1');
         }
       }
 
@@ -605,6 +651,16 @@ function updateNodeStyles(node: DOMNode | DOMText) {
       if (maskStyle !== '') {
         needsBackgroundLayer = true;
       }
+    }
+
+    // If there's still no reason to use divBg, check out tint/gradient/subtexture/radius/bgStyle
+    if (!needsBackgroundLayer && rawImgSrc) {
+      needsBackgroundLayer =
+        hasTint ||
+        !!gradient ||
+        srcPos !== null ||
+        radiusStyle !== '' ||
+        bgStyle !== '';
     }
 
     style += radiusStyle;
@@ -768,6 +824,134 @@ function updateNodeStyles(node: DOMNode | DOMText) {
           node.imgEl = undefined;
         }
       }
+    } else if (rawImgSrc) {
+      // Image directly in node.div (without divBg) when there is no tint/gradient
+
+      // Cleanup divBg
+      if (node.divBg) {
+        node.divBg.remove();
+        node.divBg = undefined;
+      }
+
+      const isSyncSubtextureUpdate =
+        srcPos != null &&
+        !!node.imgEl &&
+        node.imgEl.complete &&
+        node.imgEl.dataset.rawSrc === rawImgSrc;
+      if (isSyncSubtextureUpdate) {
+        node.imageLoading = true;
+      }
+
+      if (!node.imgEl) {
+        node.imgEl = document.createElement('img');
+        node.imgEl.alt = '';
+        node.imgEl.crossOrigin = 'anonymous';
+        node.imgEl.setAttribute('aria-hidden', 'true');
+        node.imgEl.setAttribute('loading', 'lazy');
+        node.imgEl.removeAttribute('src');
+
+        node.imgEl.addEventListener('load', () => {
+          const payload: lng.NodeTextureLoadedPayload = {
+            type: 'texture',
+            dimensions: {
+              width: node.imgEl!.naturalWidth,
+              height: node.imgEl!.naturalHeight,
+            },
+          };
+          node.imgEl!.style.display = '';
+          applySubTextureScaling(
+            node,
+            node.imgEl!,
+            node.lazyImageSubTextureProps,
+          );
+
+          const resizeMode = (node.props.textureOptions as any)?.resizeMode;
+          const clipX = resizeMode?.clipX ?? 0.5;
+          const clipY = resizeMode?.clipY ?? 0.5;
+          computeLegacyObjectFit(
+            node,
+            node.imgEl!,
+            resizeMode,
+            clipX,
+            clipY,
+            node.lazyImageSubTextureProps,
+            supportsObjectFit,
+            supportsObjectPosition,
+          );
+
+          if (node.imgEl) {
+            node.imageLoading = false;
+            node.imgEl.style.opacity = '1';
+          }
+          node.emit('loaded', payload);
+        });
+
+        node.imgEl.addEventListener('error', () => {
+          node.imageLoading = false;
+          if (node.imgEl) {
+            node.imgEl.removeAttribute('src');
+            node.imgEl.style.display = 'none';
+            node.imgEl.removeAttribute('data-rawSrc');
+          }
+
+          const failedSrc =
+            node.imgEl?.dataset.pendingSrc || node.lazyImagePendingSrc || '';
+
+          const payload: lng.NodeTextureFailedPayload = {
+            type: 'texture',
+            error: new Error(`Failed to load image: ${failedSrc}`),
+          };
+          node.emit('failed', payload);
+        });
+      }
+
+      node.lazyImagePendingSrc = rawImgSrc;
+      node.lazyImageSubTextureProps = srcPos;
+      node.imgEl.dataset.pendingSrc = rawImgSrc;
+
+      if (node.imgEl.parentElement !== node.div) {
+        node.div.appendChild(node.imgEl);
+      }
+
+      node.imgEl.setAttribute('style', imgStyle);
+
+      if (isRenderStateInBounds(node.renderState)) {
+        node.applyPendingImageSrc();
+      } else if (!node.imgEl.dataset.rawSrc) {
+        node.imgEl.removeAttribute('src');
+      }
+
+      if (
+        srcPos &&
+        node.imgEl.complete &&
+        node.imgEl.dataset.rawSrc === rawImgSrc
+      ) {
+        applySubTextureScaling(node, node.imgEl, srcPos);
+        if (node.imageLoading) {
+          node.imageLoading = false;
+          node.imgEl.style.opacity = '1';
+        }
+      }
+      if (
+        !srcPos &&
+        node.imgEl.complete &&
+        (!supportsObjectFit || !supportsObjectPosition) &&
+        node.imgEl.dataset.rawSrc === rawImgSrc
+      ) {
+        const resizeMode = (node.props.textureOptions as any)?.resizeMode;
+        const clipX = resizeMode?.clipX ?? 0.5;
+        const clipY = resizeMode?.clipY ?? 0.5;
+        computeLegacyObjectFit(
+          node,
+          node.imgEl,
+          resizeMode,
+          clipX,
+          clipY,
+          srcPos,
+          supportsObjectFit,
+          supportsObjectPosition,
+        );
+      }
     } else {
       node.lazyImagePendingSrc = null;
       node.lazyImageSubTextureProps = null;
@@ -804,20 +988,13 @@ function updateNodeStyles(node: DOMNode | DOMText) {
     }
   }
 
-  node.div.setAttribute('style', compactString(style));
-
-  if (node instanceof DOMNode && node !== node.stage.root) {
-    const hasTextureSrc = nodeHasTextureSource(node);
-    if (hasTextureSrc && node.boundsDirty) {
-      const next = computeRenderStateForNode(node);
-      if (next != null) {
-        node.updateRenderState(next);
-      }
-      node.boundsDirty = false;
-    } else if (!hasTextureSrc) {
-      node.boundsDirty = false;
-    }
+  const newStyle = compactString(style);
+  if (node._lastStyleStr !== newStyle) {
+    node._lastStyleStr = newStyle;
+    node.div.setAttribute('style', newStyle);
   }
+
+  updateRenderStateIfNeeded(node);
 }
 
 const textNodesToMeasure = new Set<DOMText>();
@@ -1091,6 +1268,8 @@ export class DOMNode extends EventEmitter implements IRendererNode {
     | null = null;
   boundsDirty = true;
   children = new Set<DOMNode>();
+  /** Cached result of the last updateNodeStyles call — avoids redundant setAttribute writes. */
+  _lastStyleStr: string = '';
 
   id = ++lastNodeId;
 
@@ -1227,7 +1406,7 @@ export class DOMNode extends EventEmitter implements IRendererNode {
     this.props.x = v;
     this.boundsDirty = true;
     this.markChildrenBoundsDirty();
-    updateNodeStyles(this);
+    updateTransformOnly(this);
   }
   get y() {
     return this.props.y;
@@ -1237,7 +1416,7 @@ export class DOMNode extends EventEmitter implements IRendererNode {
     this.props.y = v;
     this.boundsDirty = true;
     this.markChildrenBoundsDirty();
-    updateNodeStyles(this);
+    updateTransformOnly(this);
   }
   get width() {
     return this.props.width;
@@ -1391,7 +1570,7 @@ export class DOMNode extends EventEmitter implements IRendererNode {
     this.props.scale = v;
     this.boundsDirty = true;
     this.markChildrenBoundsDirty();
-    updateNodeStyles(this);
+    updateTransformOnly(this);
   }
   get scaleX() {
     return this.props.scaleX;
@@ -1401,7 +1580,7 @@ export class DOMNode extends EventEmitter implements IRendererNode {
     this.props.scaleX = v;
     this.boundsDirty = true;
     this.markChildrenBoundsDirty();
-    updateNodeStyles(this);
+    updateTransformOnly(this);
   }
   get scaleY() {
     return this.props.scaleY;
@@ -1411,7 +1590,7 @@ export class DOMNode extends EventEmitter implements IRendererNode {
     this.props.scaleY = v;
     this.boundsDirty = true;
     this.markChildrenBoundsDirty();
-    updateNodeStyles(this);
+    updateTransformOnly(this);
   }
   get mount() {
     return this.props.mount;
@@ -1421,7 +1600,7 @@ export class DOMNode extends EventEmitter implements IRendererNode {
     this.props.mount = v;
     this.boundsDirty = true;
     this.markChildrenBoundsDirty();
-    updateNodeStyles(this);
+    updateTransformOnly(this);
   }
   get mountX() {
     return this.props.mountX;
@@ -1431,7 +1610,7 @@ export class DOMNode extends EventEmitter implements IRendererNode {
     this.props.mountX = v;
     this.boundsDirty = true;
     this.markChildrenBoundsDirty();
-    updateNodeStyles(this);
+    updateTransformOnly(this);
   }
   get mountY() {
     return this.props.mountY;
@@ -1441,7 +1620,7 @@ export class DOMNode extends EventEmitter implements IRendererNode {
     this.props.mountY = v;
     this.boundsDirty = true;
     this.markChildrenBoundsDirty();
-    updateNodeStyles(this);
+    updateTransformOnly(this);
   }
   get pivot() {
     return this.props.pivot;
@@ -1481,7 +1660,7 @@ export class DOMNode extends EventEmitter implements IRendererNode {
     this.props.rotation = v;
     this.boundsDirty = true;
     this.markChildrenBoundsDirty();
-    updateNodeStyles(this);
+    updateTransformOnly(this);
   }
   get rtt() {
     return this.props.rtt;
