@@ -300,6 +300,26 @@ function updateRenderStateIfNeeded(node: DOMNode | DOMText): void {
   }
 }
 
+function applyLegacyObjectFit(
+  node: DOMNode,
+  img: HTMLImageElement,
+  srcPos: InstanceType<lng.TextureMap['SubTexture']>['props'] | null,
+): void {
+  const resizeMode = (node.props.textureOptions as any)?.resizeMode;
+  const clipX = resizeMode?.clipX ?? 0.5;
+  const clipY = resizeMode?.clipY ?? 0.5;
+  computeLegacyObjectFit(
+    node,
+    img,
+    resizeMode,
+    clipX,
+    clipY,
+    srcPos,
+    supportsObjectFit,
+    supportsObjectPosition,
+  );
+}
+
 function updateNodeStyles(node: DOMNode | DOMText) {
   let { props } = node;
 
@@ -724,20 +744,8 @@ function updateNodeStyles(node: DOMNode | DOMText) {
               node.lazyImageSubTextureProps,
             );
 
-            const resizeMode = (node.props.textureOptions as any)?.resizeMode;
-            const clipX = resizeMode?.clipX ?? 0.5;
-            const clipY = resizeMode?.clipY ?? 0.5;
             if (!node.lazyImageSubTextureProps) {
-              computeLegacyObjectFit(
-                node,
-                node.imgEl!,
-                resizeMode,
-                clipX,
-                clipY,
-                null,
-                supportsObjectFit,
-                supportsObjectPosition,
-              );
+              applyLegacyObjectFit(node, node.imgEl!, null);
             }
 
             // Reveal only after final fit/positioning is applied
@@ -807,19 +815,7 @@ function updateNodeStyles(node: DOMNode | DOMText) {
           (!supportsObjectFit || !supportsObjectPosition) &&
           node.imgEl.dataset.rawSrc === rawImgSrc
         ) {
-          const resizeMode = (node.props.textureOptions as any)?.resizeMode;
-          const clipX = resizeMode?.clipX ?? 0.5;
-          const clipY = resizeMode?.clipY ?? 0.5;
-          computeLegacyObjectFit(
-            node,
-            node.imgEl,
-            resizeMode,
-            clipX,
-            clipY,
-            srcPos,
-            supportsObjectFit,
-            supportsObjectPosition,
-          );
+          applyLegacyObjectFit(node, node.imgEl, srcPos);
         }
       } else {
         node.lazyImagePendingSrc = null;
@@ -870,20 +866,8 @@ function updateNodeStyles(node: DOMNode | DOMText) {
             node.lazyImageSubTextureProps,
           );
 
-          const resizeMode = (node.props.textureOptions as any)?.resizeMode;
-          const clipX = resizeMode?.clipX ?? 0.5;
-          const clipY = resizeMode?.clipY ?? 0.5;
           if (!node.lazyImageSubTextureProps) {
-            computeLegacyObjectFit(
-              node,
-              node.imgEl!,
-              resizeMode,
-              clipX,
-              clipY,
-              null,
-              supportsObjectFit,
-              supportsObjectPosition,
-            );
+            applyLegacyObjectFit(node, node.imgEl!, null);
           }
 
           if (node.imgEl) {
@@ -945,19 +929,7 @@ function updateNodeStyles(node: DOMNode | DOMText) {
         (!supportsObjectFit || !supportsObjectPosition) &&
         node.imgEl.dataset.rawSrc === rawImgSrc
       ) {
-        const resizeMode = (node.props.textureOptions as any)?.resizeMode;
-        const clipX = resizeMode?.clipX ?? 0.5;
-        const clipY = resizeMode?.clipY ?? 0.5;
-        computeLegacyObjectFit(
-          node,
-          node.imgEl,
-          resizeMode,
-          clipX,
-          clipY,
-          srcPos,
-          supportsObjectFit,
-          supportsObjectPosition,
-        );
+        applyLegacyObjectFit(node, node.imgEl, srcPos);
       }
     } else {
       node.lazyImagePendingSrc = null;
