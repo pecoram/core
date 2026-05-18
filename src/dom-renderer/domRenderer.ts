@@ -680,7 +680,14 @@ function updateNodeStyles(node: DOMNode | DOMText) {
       }
 
       let bgLayerStyle =
-        'position: absolute; top:0; left:0; right:0; bottom:0; z-index: -1; pointer-events: none; -webkit-clip-path: inset(0); clip-path: inset(0);';
+        'position: absolute; top:0; left:0; right:0; bottom:0; z-index: -1; pointer-events: none;';
+      // overflow:hidden clips the transformed imgEl to prevent sprite bleed-through
+      // for non-tinted subtextures. NOT applied when hasDivBgTint because
+      // overflow:hidden + CSS mask-image causes a 1px white border artifact on WebKit.
+      // Tinted nodes use mask-image for visual clipping, so overflow:hidden is unnecessary.
+      if (srcPos !== null && !hasDivBgTint) {
+        bgLayerStyle += 'overflow: hidden;';
+      }
       if (bgStyle) {
         bgLayerStyle += bgStyle;
       }
@@ -720,16 +727,18 @@ function updateNodeStyles(node: DOMNode | DOMText) {
             const resizeMode = (node.props.textureOptions as any)?.resizeMode;
             const clipX = resizeMode?.clipX ?? 0.5;
             const clipY = resizeMode?.clipY ?? 0.5;
-            computeLegacyObjectFit(
-              node,
-              node.imgEl!,
-              resizeMode,
-              clipX,
-              clipY,
-              node.lazyImageSubTextureProps,
-              supportsObjectFit,
-              supportsObjectPosition,
-            );
+            if (!node.lazyImageSubTextureProps) {
+              computeLegacyObjectFit(
+                node,
+                node.imgEl!,
+                resizeMode,
+                clipX,
+                clipY,
+                null,
+                supportsObjectFit,
+                supportsObjectPosition,
+              );
+            }
 
             // Reveal only after final fit/positioning is applied
             if (node.imgEl) {
@@ -864,16 +873,18 @@ function updateNodeStyles(node: DOMNode | DOMText) {
           const resizeMode = (node.props.textureOptions as any)?.resizeMode;
           const clipX = resizeMode?.clipX ?? 0.5;
           const clipY = resizeMode?.clipY ?? 0.5;
-          computeLegacyObjectFit(
-            node,
-            node.imgEl!,
-            resizeMode,
-            clipX,
-            clipY,
-            node.lazyImageSubTextureProps,
-            supportsObjectFit,
-            supportsObjectPosition,
-          );
+          if (!node.lazyImageSubTextureProps) {
+            computeLegacyObjectFit(
+              node,
+              node.imgEl!,
+              resizeMode,
+              clipX,
+              clipY,
+              null,
+              supportsObjectFit,
+              supportsObjectPosition,
+            );
+          }
 
           if (node.imgEl) {
             node.imageLoading = false;
